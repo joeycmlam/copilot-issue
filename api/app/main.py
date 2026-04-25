@@ -25,6 +25,7 @@ from .models import (
     CreateAndAssignRequest,
     CreateIssueRequest,
     HealthResponse,
+    IssueListResponse,
     IssueResponse,
 )
 from .services import AgentResolver, GitHubClient, IssueService
@@ -42,6 +43,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
     logger.info("Starting copilot-issue-api-v2 v%s", __version__)
+    token = settings.github_token.strip()
+    token_loaded = bool(token)
+    token_kind = (
+        "fine-grained-pat"
+        if token.startswith("github_pat_")
+        else ("classic-pat" if token.startswith("ghp_") else "other")
+    )
+    logger.info(
+        "GitHub token loaded=%s kind=%s length=%d",
+        token_loaded,
+        token_kind,
+        len(token),
+    )
+    if not token_loaded:
+        logger.warning(
+            "GITHUB_TOKEN appears empty. Set it in api/.env and restart the server."
+        )
     timeout = httpx.Timeout(settings.http_timeout_seconds)
     limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
     app.state.http = httpx.AsyncClient(timeout=timeout, limits=limits)
@@ -174,6 +192,27 @@ async def create_and_assign(
     svc: IssueService = Depends(get_issue_service),
 ) -> IssueResponse:
     return await svc.create_and_assign(owner, repo, body)
+
+
+@app.get(
+    "/repos/{owner}/{repo}/issues",
+    response_model=IssueListResponse,
+    tags=["issues"],
+    summary="List issues assigned to the Copilot agent",
+)
+async def list_issues(
+    owner: str = Path(...),
+    repo: str = Path(...),
+    state: str = "all",
+    per_page: int = 50,
+    svc: IssueService = Depends(get_issue_service),
+) -> IssueListResponse:
+    """Return GitHub issues in the repo that are assigned to the Copilot bot.
+
+    `state` is forwarded to GitHub: ``open`` | ``closed`` | ``all`` (default).
+    """
+    items = await svc.list_issues(owner, repo, state=state, per_page=per_page)
+    return IssueListResponse(items=items)
 
 
 # ---------------------------------------------------------------------------

@@ -68,6 +68,45 @@ export const assignCopilotSchema = z.object({
 });
 export type AssignCopilotInput = z.infer<typeof assignCopilotSchema>;
 
+// Issue list item — mirrors IssueListItem in the FastAPI service.
+export const issueListItemSchema = z.object({
+  number: z.number(),
+  html_url: z.string(),
+  state: z.string(),
+  title: z.string(),
+  assignees: z.array(z.string()).default([]),
+  copilot_assigned: z.boolean().default(false),
+  custom_agent: z.string().nullable().optional(),
+  labels: z.array(z.string()).default([]),
+  created_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+});
+export type IssueListItem = z.infer<typeof issueListItemSchema>;
+
+export const issueListResponseSchema = z.object({
+  items: z.array(issueListItemSchema),
+});
+export type IssueListResponse = z.infer<typeof issueListResponseSchema>;
+
+// Custom agent — mirrors CustomAgent in the FastAPI service.
+export const customAgentSchema = z.object({
+  name: z.string(),
+  scope: z.enum(["repo", "org", "enterprise"]),
+  source_repo: z.string(),
+  path: z.string(),
+  description: z.string().nullable().optional(),
+  tools: z.array(z.string()).default([]),
+  handoffs: z.array(z.string()).default([]),
+  target: z.enum(["vscode", "github-copilot", "any"]).default("any"),
+});
+export type CustomAgent = z.infer<typeof customAgentSchema>;
+
+export const agentListResponseSchema = z.object({
+  scope: z.enum(["repo", "org", "enterprise", "all"]),
+  agents: z.array(customAgentSchema),
+});
+export type AgentListResponse = z.infer<typeof agentListResponseSchema>;
+
 // Settings the UI persists in React state (NOT localStorage — blocked in iframe).
 export const settingsSchema = z.object({
   // "" => use same-origin /api proxy. A full URL means direct browser->FastAPI.
