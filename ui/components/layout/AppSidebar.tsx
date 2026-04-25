@@ -1,4 +1,6 @@
-import { Link, useLocation } from "wouter";
+"use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   CircleDot,
   Bot,
@@ -25,6 +27,13 @@ import { Logo } from "@/components/brand/Logo";
 import { useSettings } from "@/lib/settings";
 
 const NAV_MAIN = [
+  {
+    title: "Dashboard",
+    url: "/dashboard",
+    icon: LayoutDashboard,
+    testId: "nav-dashboard",
+    matchFn: (loc: string) => loc === "/dashboard" || loc.startsWith("/dashboard/"),
+  },
   {
     title: "Issues",
     url: "/issues",
@@ -54,17 +63,10 @@ const NAV_MAIN = [
     testId: "nav-assign",
     matchFn: (loc: string) => loc === "/assign" || loc.startsWith("/assign/"),
   },
-  {
-    title: "Dashboard",
-    url: "/dashboard",
-    icon: LayoutDashboard,
-    testId: "nav-dashboard",
-    matchFn: (loc: string) => loc === "/dashboard" || loc.startsWith("/dashboard/"),
-  },
 ] as const;
 
 export function AppSidebar() {
-  const [location] = useLocation();
+  const location = usePathname() ?? "/";
   const { settings } = useSettings();
 
   return (

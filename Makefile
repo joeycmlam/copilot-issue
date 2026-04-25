@@ -16,7 +16,7 @@ dev: ## Start both API and UI dev servers in parallel
 dev-api: ## Start FastAPI dev server (http://localhost:8000)
 	cd api && poetry run uvicorn app.main:app --reload
 
-dev-ui: ## Start Vite/Express UI dev server (http://localhost:5173)
+dev-ui: ## Start Next.js UI dev server (http://localhost:3008)
 	npm run dev --workspace=ui
 
 # ── Build ──────────────────────────────────────────────────────────────────────
