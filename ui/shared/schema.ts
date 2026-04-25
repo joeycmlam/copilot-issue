@@ -1,0 +1,94 @@
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// =============================================================================
+// Domain types — mirror the FastAPI service's Pydantic models.
+//
+// These are NOT persisted; the UI is stateless. They live here so frontend and
+// backend (the proxy) share the exact same shape we forward to the upstream
+// Copilot Issue Assignment API v2.
+// =============================================================================
+
+export const skillRefSchema = z.object({
+  name: z.string().min(1),
+  version: z.string().optional(),
+});
+export type SkillRef = z.infer<typeof skillRefSchema>;
+
+export const toolRefSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(["builtin", "mcp", "server"]).default("mcp"),
+});
+export type ToolRef = z.infer<typeof toolRefSchema>;
+
+export const knowledgeRefSchema = z.object({
+  kind: z.enum(["repo_path", "url", "glossary"]),
+  value: z.string().min(1),
+});
+export type KnowledgeRef = z.infer<typeof knowledgeRefSchema>;
+
+export const agentAssignmentSchema = z.object({
+  target_repo: z.string().optional(),
+  base_branch: z.string().optional(),
+  custom_instructions: z.string().default(""),
+  custom_agent: z.string().default(""),
+  model: z.string().default(""),
+});
+export type AgentAssignment = z.infer<typeof agentAssignmentSchema>;
+
+export const createIssueSchema = z.object({
+  title: z.string().min(1).max(256),
+  prompt: z.string().min(1),
+  labels: z.array(z.string()).default([]),
+  assignees: z.array(z.string()).default([]),
+  milestone: z.number().int().nullable().optional(),
+  skills: z.array(skillRefSchema).default([]),
+  tools: z.array(toolRefSchema).default([]),
+  knowledge_refs: z.array(knowledgeRefSchema).default([]),
+});
+export type CreateIssueInput = z.infer<typeof createIssueSchema>;
+
+export const createAndAssignSchema = createIssueSchema.extend({
+  agent: agentAssignmentSchema.default({
+    custom_instructions: "",
+    custom_agent: "",
+    model: "",
+  }),
+});
+export type CreateAndAssignInput = z.infer<typeof createAndAssignSchema>;
+
+export const assignCopilotSchema = z.object({
+  agent: agentAssignmentSchema.default({
+    custom_instructions: "",
+    custom_agent: "",
+    model: "",
+  }),
+  keep_existing_assignees: z.boolean().default(true),
+});
+export type AssignCopilotInput = z.infer<typeof assignCopilotSchema>;
+
+// Settings the UI persists in React state (NOT localStorage — blocked in iframe).
+export const settingsSchema = z.object({
+  // "" => use same-origin /api proxy. A full URL means direct browser->FastAPI.
+  apiBaseUrl: z.string().default(""),
+  pat: z.string().default(""),
+  defaultOwner: z.string().default(""),
+  defaultRepo: z.string().default(""),
+  defaultBaseBranch: z.string().default("main"),
+  defaultEnterprise: z.string().default(""),
+});
+export type Settings = z.infer<typeof settingsSchema>;
+
+// -- Template's required exports (kept so server/storage.ts compiles) ---------
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+});
+export const insertUserSchema = createInsertSchema(users).pick({
+  username: true,
+  password: true,
+});
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;

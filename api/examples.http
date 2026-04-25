@@ -1,0 +1,101 @@
+### Copilot Issue Assignment API v2 — examples
+### Use with the VS Code REST Client extension or JetBrains HTTP Client.
+
+@host = http://localhost:8000
+@org  = acme
+@repo = payments-service
+
+### --- Health -----------------------------------------------------------
+GET {{host}}/health
+Accept: application/json
+
+
+### --- 1. Create issue (no Copilot) ------------------------------------
+POST {{host}}/repos/{{org}}/{{repo}}/issues
+Content-Type: application/json
+
+{
+  "title": "Add idempotency keys to /v1/payments",
+  "prompt": "## User story\nAs a merchant, I want POST /v1/payments to accept an idempotency key so that retried requests don't double-charge.\n\n## Acceptance criteria\n- Header `Idempotency-Key` is honoured for 24h.\n- Concurrent duplicate requests return the same response without re-executing the side effect.\n- Documented in OpenAPI.",
+  "labels": ["enhancement", "api"],
+  "skills": [
+    { "name": "code-generation", "version": "1.4.0" },
+    { "name": "test-generation" },
+    { "name": "doc-authoring" }
+  ],
+  "tools": [
+    { "name": "github", "type": "builtin" }
+  ],
+  "knowledge_refs": [
+    { "kind": "repo_path", "value": "docs/adr/0007-idempotency.md" },
+    { "kind": "repo_path", "value": "docs/api/openapi.yaml" }
+  ]
+}
+
+
+### --- 2. Assign existing issue to Copilot + backend-agent --------------
+# Replace 42 with a real issue number created above.
+POST {{host}}/repos/{{org}}/{{repo}}/issues/42/assign-copilot
+Content-Type: application/json
+
+{
+  "agent": {
+    "target_repo": "{{org}}/{{repo}}",
+    "base_branch": "main",
+    "custom_instructions": "Follow the team's idempotency ADR (docs/adr/0007).",
+    "custom_agent": "backend-agent"
+  },
+  "keep_existing_assignees": true
+}
+
+
+### --- 3. Create + assign in one call (recommended) --------------------
+POST {{host}}/repos/{{org}}/{{repo}}/issues/create-and-assign
+Content-Type: application/json
+
+{
+  "title": "Add NewRelic SLO dashboard for /v1/payments",
+  "prompt": "Create a NewRelic dashboard tracking p99 latency, error rate, and Apdex for the /v1/payments endpoint, and document the SLOs.",
+  "labels": ["observability"],
+  "skills": [
+    { "name": "observability" },
+    { "name": "doc-authoring" }
+  ],
+  "tools": [
+    { "name": "newrelic", "type": "mcp" }
+  ],
+  "knowledge_refs": [
+    { "kind": "repo_path", "value": "docs/observability/slos.md" }
+  ],
+  "agent": {
+    "custom_agent": "observability-agent",
+    "base_branch": "main",
+    "custom_instructions": "Pin the dashboard to the 'Payments' folder."
+  }
+}
+
+
+### --- 4. Replace assignees (Copilot only, no humans) ------------------
+POST {{host}}/repos/{{org}}/{{repo}}/issues/42/assign-copilot
+Content-Type: application/json
+
+{
+  "agent": { "custom_agent": "qa-agent" },
+  "keep_existing_assignees": false
+}
+
+
+### --- 5. List repo-level agents ---------------------------------------
+GET {{host}}/agents/repo/{{org}}/{{repo}}
+
+
+### --- 6. List org-level agents (from <org>/.github-private) -----------
+GET {{host}}/agents/org/{{org}}
+
+
+### --- 7. List enterprise-level agents ---------------------------------
+GET {{host}}/agents/enterprise/acme-enterprise-admin
+
+
+### --- 8. List ALL agents in resolution order --------------------------
+GET {{host}}/agents/{{org}}/{{repo}}/all
