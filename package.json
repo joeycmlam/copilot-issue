@@ -1,0 +1,16 @@
+{
+  "name": "copilot-issue",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "ui"
+  ],
+  "scripts": {
+    "dev:api": "cd api && poetry run uvicorn app.main:app --reload",
+    "dev:ui": "npm run dev --workspace=ui",
+    "build": "npm run build --workspace=ui",
+    "test:api": "cd api && poetry run pytest",
+    "check:ui": "npm run check --workspace=ui",
+    "install:api": "cd api && poetry install"
+  }
+}
