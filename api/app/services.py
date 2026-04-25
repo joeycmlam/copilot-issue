@@ -30,6 +30,7 @@ from .models import (
     CreateAndAssignRequest,
     CreateIssueRequest,
     CustomAgent,
+    IssueListItem,
     IssueResponse,
     KnowledgeRef,
     SkillRef,
@@ -452,6 +453,56 @@ class IssueService:
             assign_copilot=True,
             agent=body.agent,
         )
+
+    # -- List issues assigned to Copilot ----------------------------------
+
+    async def list_issues(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        state: str = "all",
+        per_page: int = 50,
+    ) -> list[IssueListItem]:
+        """Return issues assigned to the Copilot bot login."""
+        result = await self._gh.rest(
+            "GET",
+            f"/repos/{owner}/{repo}/issues",
+            params={
+                "assignee": self._settings.copilot_bot_login,
+                "state": state,
+                "per_page": min(per_page, 100),
+            },
+        )
+        if not isinstance(result, list):
+            return []
+        items: list[IssueListItem] = []
+        for issue in result:
+            assignees = [a.get("login", "") for a in issue.get("assignees", [])]
+            labels = [lbl.get("name", "") for lbl in issue.get("labels", [])]
+            # Best-effort: extract custom_agent from the issue body directives
+            # block; fall back to None when absent.
+            custom_agent: str | None = None
+            body_text = issue.get("body") or ""
+            for line in body_text.splitlines():
+                if line.startswith("custom_agent:"):
+                    custom_agent = line.split(":", 1)[1].strip() or None
+                    break
+            items.append(
+                IssueListItem(
+                    number=issue["number"],
+                    html_url=issue.get("html_url", ""),
+                    state=issue.get("state", "open"),
+                    title=issue.get("title", ""),
+                    assignees=assignees,
+                    copilot_assigned=self._settings.copilot_bot_login in assignees,
+                    custom_agent=custom_agent,
+                    labels=labels,
+                    created_at=issue.get("created_at"),
+                    updated_at=issue.get("updated_at"),
+                )
+            )
+        return items
 
     # -- Internals --------------------------------------------------------
 

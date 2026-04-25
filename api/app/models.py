@@ -214,6 +214,32 @@ class AgentList(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Issue listing
+# ---------------------------------------------------------------------------
+
+
+class IssueListItem(BaseModel):
+    """Summary of a single GitHub issue in the list response."""
+
+    number: int
+    html_url: str
+    state: str  # "open" | "closed"
+    title: str
+    assignees: list[str] = Field(default_factory=list)
+    copilot_assigned: bool = False
+    custom_agent: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class IssueListResponse(BaseModel):
+    """Response body for GET /repos/{owner}/{repo}/issues."""
+
+    items: list[IssueListItem]
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 

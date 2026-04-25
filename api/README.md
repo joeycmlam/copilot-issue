@@ -91,6 +91,13 @@ poetry run uvicorn app.main:app --reload
 open http://localhost:8000/docs
 ```
 
+To start on a specific port (e.g. `8080`):
+
+```bash
+poetry run uvicorn app.main:app --reload --port 8080
+open http://localhost:8080/docs
+```
+
 ### PAT requirements
 
 | Scope               | What it enables                                           |

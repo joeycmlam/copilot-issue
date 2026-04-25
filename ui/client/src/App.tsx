@@ -1,3 +1,4 @@
+import { Component, type ReactNode } from "react";
 import { Switch, Route, Router } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -13,6 +14,7 @@ import { AppSidebar } from "@/components/layout/AppSidebar";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { UpstreamBadge } from "@/components/layout/UpstreamBadge";
 
+import Issues from "@/pages/issues";
 import Dashboard from "@/pages/dashboard";
 import CreateAndAssign from "@/pages/create-and-assign";
 import AssignExisting from "@/pages/assign-existing";
@@ -23,7 +25,9 @@ import NotFound from "@/pages/not-found";
 function AppRouter() {
   return (
     <Switch>
-      <Route path="/" component={Dashboard} />
+      <Route path="/" component={Issues} />
+      <Route path="/issues" component={Issues} />
+      <Route path="/dashboard" component={Dashboard} />
       <Route path="/create" component={CreateAndAssign} />
       <Route path="/assign" component={AssignExisting} />
       <Route path="/agents" component={AgentsBrowser} />
@@ -33,21 +37,20 @@ function AppRouter() {
   );
 }
 
-function Shell() {
-  const sidebarStyle = {
-    "--sidebar-width": "17rem",
-    "--sidebar-width-icon": "3.25rem",
-  } as React.CSSProperties;
+const sidebarStyle = {
+  "--sidebar-width": "16rem",
+  "--sidebar-width-icon": "3.25rem",
+} as React.CSSProperties;
 
+function Shell() {
   return (
     <SidebarProvider style={sidebarStyle}>
       <div className="flex h-screen w-full bg-background">
         <AppSidebar />
         <div className="flex flex-1 flex-col min-w-0">
-          <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5 shrink-0">
             <div className="flex items-center gap-2">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <span className="kbd hidden sm:inline">⌘ B</span>
             </div>
             <div className="flex items-center gap-2">
               <UpstreamBadge />
@@ -55,9 +58,7 @@ function Shell() {
             </div>
           </header>
           <main className="flex-1 overflow-y-auto app-grid-bg">
-            <Router hook={useHashLocation}>
-              <AppRouter />
-            </Router>
+            <AppRouter />
           </main>
         </div>
       </div>
@@ -65,17 +66,51 @@ function Shell() {
   );
 }
 
-export default function App() {
+function AppInner() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <SettingsProvider>
           <TooltipProvider>
-            <Shell />
+            {/* Router wraps the entire shell so sidebar and content share the same hash-based context */}
+            <Router hook={useHashLocation}>
+              <Shell />
+            </Router>
             <Toaster />
           </TooltipProvider>
         </SettingsProvider>
       </ThemeProvider>
     </QueryClientProvider>
+  );
+}
+
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: "2rem", fontFamily: "monospace", color: "red" }}>
+          <strong>Render error:</strong>
+          <pre style={{ whiteSpace: "pre-wrap", marginTop: "0.5rem" }}>
+            {String(this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppInner />
+    </AppErrorBoundary>
   );
 }

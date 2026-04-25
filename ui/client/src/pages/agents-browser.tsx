@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { Loader2, RefreshCw, Search, ChevronDown, ChevronUp } from "lucide-react";
 
 import { useSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -12,22 +12,32 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { useQueryClient } from "@tanstack/react-query";
 
+// Mirrors CustomAgent from the FastAPI service
 type AgentSummary = {
   name: string;
   scope: "repo" | "org" | "enterprise";
+  source_repo: string;
+  path: string;
   description?: string | null;
   tools?: string[];
-  model?: string | null;
-  source_path?: string | null;
+  handoffs?: string[];
+  target?: "vscode" | "github-copilot" | "any";
 };
 
-type AgentListResponse = { items: AgentSummary[] } | AgentSummary[];
+// API returns { scope, agents, resolution_order }
+type AgentListResponse = {
+  scope: string;
+  agents: AgentSummary[];
+  resolution_order?: string[];
+};
 
 function normalize(data: AgentListResponse | undefined): AgentSummary[] {
   if (!data) return [];
-  return Array.isArray(data) ? data : (data.items ?? []);
+  return data.agents ?? [];
 }
 
 function scopeColor(scope: AgentSummary["scope"]) {
@@ -36,6 +46,76 @@ function scopeColor(scope: AgentSummary["scope"]) {
     : scope === "org"
       ? "border-primary/40 bg-accent text-accent-foreground"
       : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400";
+}
+
+function AgentCard({ agent }: { agent: AgentSummary }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card className="hover-elevate" data-testid={`card-agent-${agent.name}`}>
+      <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
+        <div className="min-w-0 space-y-0.5">
+          <CardTitle className="font-mono text-sm truncate">{agent.name}</CardTitle>
+          <div className="text-[11px] text-muted-foreground font-mono truncate" title={agent.path}>
+            {agent.source_repo}/{agent.path}
+          </div>
+        </div>
+        <Badge variant="outline" className={`${scopeColor(agent.scope)} font-mono text-[11px] shrink-0`}>
+          {agent.scope}
+        </Badge>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0">
+        {agent.description && (
+          <p className="text-sm text-muted-foreground">{agent.description}</p>
+        )}
+        {agent.tools && agent.tools.length > 0 && (
+          <div>
+            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Tools</div>
+            <div className="flex flex-wrap gap-1.5">
+              {agent.tools.map((t) => (
+                <span key={t} className="pill text-[11px]">{t}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        <Collapsible open={open} onOpenChange={setOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-6 px-2 gap-1 text-[11px] text-muted-foreground -ml-2">
+              {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              {open ? "Less" : "More context"}
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2 pt-1">
+            <Separator />
+            {agent.handoffs && agent.handoffs.length > 0 && (
+              <div>
+                <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Handoffs</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {agent.handoffs.map((h) => (
+                    <span key={h} className="pill text-[11px]">{h}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div>
+                <span className="text-muted-foreground">Target: </span>
+                <span className="font-mono">{agent.target ?? "any"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Scope: </span>
+                <span className="font-mono">{agent.scope}</span>
+              </div>
+            </div>
+            <div className="text-[11px]">
+              <span className="text-muted-foreground">Source: </span>
+              <span className="font-mono break-all">{agent.source_repo}</span>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      </CardContent>
+    </Card>
+  );
 }
 
 function AgentList({
@@ -71,7 +151,8 @@ function AgentList({
         (a) =>
           a.name.toLowerCase().includes(f) ||
           (a.description ?? "").toLowerCase().includes(f) ||
-          (a.tools ?? []).some((t) => t.toLowerCase().includes(f)),
+          (a.tools ?? []).some((t) => t.toLowerCase().includes(f)) ||
+          (a.handoffs ?? []).some((h) => h.toLowerCase().includes(f)),
       )
     : agents;
 
@@ -85,43 +166,7 @@ function AgentList({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="grid-agents">
       {filtered.map((a) => (
-        <Card key={`${a.scope}-${a.name}`} className="hover-elevate" data-testid={`card-agent-${a.name}`}>
-          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="font-mono text-sm truncate">{a.name}</CardTitle>
-              {a.source_path && (
-                <div className="text-[11px] text-muted-foreground font-mono truncate" title={a.source_path}>
-                  {a.source_path}
-                </div>
-              )}
-            </div>
-            <Badge variant="outline" className={`${scopeColor(a.scope)} font-mono text-[11px] shrink-0`}>
-              {a.scope}
-            </Badge>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {a.description && (
-              <p className="text-sm text-muted-foreground line-clamp-3">{a.description}</p>
-            )}
-            {a.tools && a.tools.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {a.tools.slice(0, 8).map((t) => (
-                  <span key={t} className="pill text-[11px]">
-                    {t}
-                  </span>
-                ))}
-                {a.tools.length > 8 && (
-                  <span className="pill text-[11px]">+{a.tools.length - 8}</span>
-                )}
-              </div>
-            )}
-            {a.model && (
-              <div className="text-[11px] text-muted-foreground font-mono">
-                model: <span className="text-foreground">{a.model}</span>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <AgentCard key={`${a.scope}-${a.name}`} agent={a} />
       ))}
     </div>
   );
