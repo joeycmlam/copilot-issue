@@ -21,7 +21,7 @@ export function RepoFields({
   const hasDefaults = Boolean(settings.defaultOwner && settings.defaultRepo);
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+    <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-start">
       <div className="space-y-1.5">
         <Label htmlFor="field-owner">Owner / org</Label>
         <Input

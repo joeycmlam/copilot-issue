@@ -6,7 +6,7 @@
     "ui"
   ],
   "scripts": {
-    "dev:api": "cd api && poetry run uvicorn app.main:app --reload",
+    "dev:api": "cd api && poetry run uvicorn app.main:app --reload --port 8080",
     "dev:ui": "npm run dev --workspace=ui",
     "build": "npm run build --workspace=ui",
     "test:api": "cd api && poetry run pytest",
