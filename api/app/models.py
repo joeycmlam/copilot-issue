@@ -188,29 +188,41 @@ class IssueResponse(BaseModel):
 
 
 class CustomAgent(BaseModel):
-    """One custom agent profile discovered in a repo, org, or enterprise."""
+    """One custom agent profile discovered in a repo, org, enterprise, or the API service itself."""
 
     name: str
-    scope: Literal["repo", "org", "enterprise"]
+    scope: Literal["repo", "org", "enterprise", "service"]
     source_repo: str = Field(
         ...,
-        description="OWNER/REPO where the .agent.md file actually lives.",
+        description="OWNER/REPO where the .agent.md file lives, or '(built-in)' for service-level agents.",
     )
     path: str
     description: str | None = None
     tools: list[str] = Field(default_factory=list)
     handoffs: list[str] = Field(default_factory=list)
     target: Literal["vscode", "github-copilot", "any"] = "any"
+    allowed_teams: list[str] = Field(
+        default_factory=list,
+        description="Team slugs allowed to use this agent. Empty list means available to all.",
+    )
 
 
 class AgentList(BaseModel):
     """Response body for the various /agents endpoints."""
 
-    scope: Literal["repo", "org", "enterprise", "all"]
+    scope: Literal["repo", "org", "enterprise", "service", "all"]
     agents: list[CustomAgent]
-    resolution_order: list[Literal["repo", "org", "enterprise"]] = Field(
-        default_factory=lambda: ["repo", "org", "enterprise"]
+    resolution_order: list[Literal["repo", "org", "enterprise", "service"]] = Field(
+        default_factory=lambda: ["repo", "org", "enterprise", "service"]
     )
+
+
+class AgentBodyResponse(BaseModel):
+    """Response body for GET /agents/content — returns the raw .agent.md text."""
+
+    name: str
+    scope: str
+    body: str
 
 
 # ---------------------------------------------------------------------------

@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json as _json_mod
 import logging
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -78,6 +81,14 @@ class GitHubClient:
         params: dict | None = None,
     ) -> dict | list | None:
         url = f"{self._settings.github_api_url}{path}"
+        logger.info(
+            "GitHub REST request  method=%s url=%s params=%s body=%s",
+            method,
+            url,
+            _json_mod.dumps(params) if params else "null",
+            _json_mod.dumps(json) if json else "null",
+        )
+        t0 = time.monotonic()
         resp = await self._client.request(
             method,
             url,
@@ -85,15 +96,37 @@ class GitHubClient:
             params=params,
             headers=self._settings.auth_header,
         )
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "GitHub REST response method=%s url=%s status=%d elapsed_ms=%.1f",
+            method,
+            url,
+            resp.status_code,
+            elapsed_ms,
+        )
         return self._handle(resp)
 
     # -- GraphQL -----------------------------------------------------------
 
     async def graphql(self, query: str, variables: dict | None = None) -> dict:
+        logger.info(
+            "GitHub GraphQL request  url=%s variables=%s",
+            self._settings.github_graphql_url,
+            _json_mod.dumps(variables) if variables else "null",
+        )
+        logger.debug("GitHub GraphQL query:\n%s", query.strip())
+        t0 = time.monotonic()
         resp = await self._client.post(
             self._settings.github_graphql_url,
             json={"query": query, "variables": variables or {}},
             headers=self._settings.graphql_header,
+        )
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "GitHub GraphQL response url=%s status=%d elapsed_ms=%.1f",
+            self._settings.github_graphql_url,
+            resp.status_code,
+            elapsed_ms,
         )
         body = self._handle(resp)
         if isinstance(body, dict) and body.get("errors"):
@@ -180,9 +213,14 @@ class AgentResolver:
         )
 
     async def list_all(
-        self, owner: str, repo: str, enterprise_owner: str = ""
+        self,
+        owner: str,
+        repo: str,
+        enterprise_owner: str = "",
+        store: "AgentStore | None" = None,
+        teams: list[str] | None = None,
     ) -> list[CustomAgent]:
-        """Resolution order: repo -> org -> enterprise. Earlier wins on name."""
+        """Resolution order: repo -> org -> enterprise -> service. Earlier wins on name."""
 
         repo_agents, org_agents, ent_agents = await asyncio.gather(
             self.list_repo(owner, repo),
@@ -190,15 +228,30 @@ class AgentResolver:
             self.list_enterprise(enterprise_owner) if enterprise_owner else _empty(),
         )
 
+        svc_agents: list[CustomAgent] = store.list_agents(teams) if store else []
+
         seen: set[str] = set()
         merged: list[CustomAgent] = []
-        for batch in (repo_agents, org_agents, ent_agents):
+        for batch in (repo_agents, org_agents, ent_agents, svc_agents):
             for a in batch:
                 if a.name in seen:
                     continue
                 seen.add(a.name)
                 merged.append(a)
         return merged
+
+    async def fetch_body(self, source_repo: str, path: str) -> str | None:
+        """Fetch the raw text of a single .agent.md file from GitHub."""
+        try:
+            content = await self._gh.rest(
+                "GET",
+                f"/repos/{source_repo}/contents/{path}",
+            )
+        except GitHubError:
+            return None
+        if not isinstance(content, dict) or content.get("encoding") != "base64":
+            return None
+        return base64.b64decode(content["content"]).decode("utf-8", errors="replace")
 
     # -- Internals ---------------------------------------------------------
 
@@ -262,6 +315,88 @@ class AgentResolver:
 
 async def _empty() -> list[CustomAgent]:
     return []
+
+
+# ---------------------------------------------------------------------------
+# Service-level agent store
+# ---------------------------------------------------------------------------
+
+_AGENTS_DIR = Path(__file__).parent.parent / "agents"
+
+
+class AgentStore:
+    """Serves `.agent.md` files bundled with the API service.
+
+    Files live under ``api/agents/`` in the repo.  Any file whose YAML
+    frontmatter contains an ``allowed_teams`` list is restricted to callers
+    whose team membership intersects that list.  An absent or empty
+    ``allowed_teams`` makes the agent visible to everyone.
+    """
+
+    def __init__(self, agents_dir: Path = _AGENTS_DIR):
+        self._dir = agents_dir
+
+    def list_agents(self, teams: list[str] | None = None) -> list[CustomAgent]:
+        """Return all service agents the caller is allowed to see.
+
+        ``teams`` is the caller's team slug list (e.g. ``["platform", "qa"]``).
+        Pass ``None`` or ``[]`` to get only public (unrestricted) agents.
+        """
+        caller_teams = set(teams or [])
+        agents: list[CustomAgent] = []
+        if not self._dir.is_dir():
+            return agents
+        # Collect all .agent.md and .md files; .agent.md takes priority on
+        # name collisions (same resolution order as AgentResolver).
+        _seen_names: set[str] = set()
+        _all_paths = sorted(
+            {*self._dir.rglob("*.agent.md"), *self._dir.rglob("*.md")}
+        )
+        # Sort so .agent.md files come first (they win on name collision).
+        _all_paths.sort(key=lambda p: (0 if p.name.endswith(".agent.md") else 1, p))
+        for path in _all_paths:
+            if path.name.lower() in {"readme.md", "index.md"}:
+                continue
+            try:
+                raw = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            meta, _body = _split_frontmatter(raw)
+            allowed: list[str] = list(meta.get("allowed_teams", []) or [])
+            if allowed and not caller_teams.intersection(allowed):
+                continue
+            agent_name = path.stem.removesuffix(".agent")
+            resolved_name = meta.get("name", agent_name)
+            if resolved_name in _seen_names:
+                continue
+            _seen_names.add(resolved_name)
+            agents.append(
+                CustomAgent(
+                    name=resolved_name,
+                    scope="service",
+                    source_repo="(built-in)",
+                    path=str(path.relative_to(self._dir)),
+                    description=meta.get("description"),
+                    tools=list(meta.get("tools", []) or []),
+                    handoffs=list(meta.get("handoffs", []) or []),
+                    target=meta.get("target", "any"),
+                    allowed_teams=allowed,
+                )
+            )
+        return agents
+
+    def get_body(self, path: str) -> str | None:
+        """Return raw text of a service-level .agent.md file (disk read)."""
+        target = (self._dir / path).resolve()
+        # Guard against path traversal outside the agents directory.
+        try:
+            target.relative_to(self._dir.resolve())
+        except ValueError:
+            return None
+        try:
+            return target.read_text(encoding="utf-8")
+        except OSError:
+            return None
 
 
 def _split_frontmatter(text: str) -> tuple[dict, str]:
