@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json as _json_mod
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -79,6 +81,14 @@ class GitHubClient:
         params: dict | None = None,
     ) -> dict | list | None:
         url = f"{self._settings.github_api_url}{path}"
+        logger.info(
+            "GitHub REST request  method=%s url=%s params=%s body=%s",
+            method,
+            url,
+            _json_mod.dumps(params) if params else "null",
+            _json_mod.dumps(json) if json else "null",
+        )
+        t0 = time.monotonic()
         resp = await self._client.request(
             method,
             url,
@@ -86,15 +96,37 @@ class GitHubClient:
             params=params,
             headers=self._settings.auth_header,
         )
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "GitHub REST response method=%s url=%s status=%d elapsed_ms=%.1f",
+            method,
+            url,
+            resp.status_code,
+            elapsed_ms,
+        )
         return self._handle(resp)
 
     # -- GraphQL -----------------------------------------------------------
 
     async def graphql(self, query: str, variables: dict | None = None) -> dict:
+        logger.info(
+            "GitHub GraphQL request  url=%s variables=%s",
+            self._settings.github_graphql_url,
+            _json_mod.dumps(variables) if variables else "null",
+        )
+        logger.debug("GitHub GraphQL query:\n%s", query.strip())
+        t0 = time.monotonic()
         resp = await self._client.post(
             self._settings.github_graphql_url,
             json={"query": query, "variables": variables or {}},
             headers=self._settings.graphql_header,
+        )
+        elapsed_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "GitHub GraphQL response url=%s status=%d elapsed_ms=%.1f",
+            self._settings.github_graphql_url,
+            resp.status_code,
+            elapsed_ms,
         )
         body = self._handle(resp)
         if isinstance(body, dict) and body.get("errors"):

@@ -61,6 +61,13 @@ class Settings(BaseSettings):
 
     # -- Observability -----------------------------------------------------
     log_level: str = Field(default="INFO")
+    log_dir: str = Field(
+        default="logs",
+        description=(
+            "Directory for rotating log files (relative to the working directory). "
+            "Files are rotated daily; set to empty string to disable file logging."
+        ),
+    )
 
     # -- Derived helpers ---------------------------------------------------
     @property

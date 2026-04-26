@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .config import Settings, get_settings
+from .logging_setup import configure_logging
 from .models import (
     AgentBodyResponse,
     AgentList,
@@ -42,7 +43,7 @@ logger = logging.getLogger("copilot_issue_api")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    logging.basicConfig(level=settings.log_level.upper())
+    configure_logging(level=settings.log_level, log_dir=settings.log_dir)
     logger.info("Starting copilot-issue-api-v2 v%s", __version__)
     token = settings.github_token.strip()
     token_loaded = bool(token)
