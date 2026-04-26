@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Search, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, RefreshCw, Search, ChevronDown, ChevronUp, Eye } from "lucide-react";
 
 import { useSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -14,6 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQueryClient } from "@tanstack/react-query";
 
 // Mirrors CustomAgent from the FastAPI service
@@ -51,7 +53,7 @@ function scopeColor(scope: AgentSummary["scope"]) {
         : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400";
 }
 
-function AgentCard({ agent }: { agent: AgentSummary }) {
+function AgentCard({ agent, onViewContext }: { agent: AgentSummary; onViewContext: (a: AgentSummary) => void }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -63,9 +65,21 @@ function AgentCard({ agent }: { agent: AgentSummary }) {
             {agent.source_repo}/{agent.path}
           </div>
         </div>
-        <Badge variant="outline" className={`${scopeColor(agent.scope)} font-mono text-[11px] shrink-0`}>
-          {agent.scope}
-        </Badge>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            title="View context"
+            onClick={() => onViewContext(agent)}
+            data-testid={`button-context-${agent.name}`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+          <Badge variant="outline" className={`${scopeColor(agent.scope)} font-mono text-[11px]`}>
+            {agent.scope}
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3 pt-0">
         {agent.description && (
@@ -137,12 +151,14 @@ function AgentList({
   error,
   filter,
   emptyHint,
+  onViewContext,
 }: {
   agents: AgentSummary[];
   loading: boolean;
   error: Error | null;
   filter: string;
   emptyHint: string;
+  onViewContext: (a: AgentSummary) => void;
 }) {
   if (loading) {
     return (
@@ -179,9 +195,81 @@ function AgentList({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="grid-agents">
       {filtered.map((a) => (
-        <AgentCard key={`${a.scope}-${a.name}`} agent={a} />
+        <AgentCard key={`${a.scope}-${a.name}`} agent={a} onViewContext={onViewContext} />
       ))}
     </div>
+  );
+}
+
+type AgentBodyResponse = {
+  name: string;
+  scope: string;
+  body: string;
+};
+
+function AgentContextSheet({
+  agent,
+  onClose,
+}: {
+  agent: AgentSummary | null;
+  onClose: () => void;
+}) {
+  const bodyQ = useQuery<AgentBodyResponse>({
+    queryKey: ["/proxy/agents/content", agent?.scope, agent?.source_repo, agent?.path],
+    enabled: agent != null,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        scope: agent!.scope,
+        source_repo: agent!.source_repo,
+        path: agent!.path,
+      });
+      const res = await fetch(`/api/proxy/agents/content?${params}`, {
+        headers: { accept: "application/json" },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+  });
+
+  return (
+    <Sheet open={agent != null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent className="w-full sm:max-w-2xl flex flex-col gap-0 p-0">
+        <SheetHeader className="px-6 py-4 border-b shrink-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <SheetTitle className="font-mono text-sm">{agent?.name}</SheetTitle>
+            {agent && (
+              <Badge variant="outline" className={`${scopeColor(agent.scope)} font-mono text-[11px]`}>
+                {agent.scope}
+              </Badge>
+            )}
+          </div>
+          {agent && (
+            <p className="text-[11px] text-muted-foreground font-mono break-all mt-0.5">
+              {agent.source_repo}/{agent.path}
+            </p>
+          )}
+        </SheetHeader>
+        <div className="flex-1 min-h-0">
+          {bodyQ.isLoading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground p-6">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            </div>
+          )}
+          {bodyQ.error && (
+            <div className="text-sm text-destructive p-6 font-mono whitespace-pre-wrap">
+              {(bodyQ.error as Error).message}
+            </div>
+          )}
+          {bodyQ.data && (
+            <ScrollArea className="h-full">
+              <pre className="text-xs font-mono p-6 whitespace-pre-wrap break-words leading-relaxed">
+                {bodyQ.data.body}
+              </pre>
+            </ScrollArea>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -193,6 +281,7 @@ export default function AgentsBrowser() {
   const [enterprise, setEnterprise] = useState(settings.defaultEnterprise);
   const [filter, setFilter] = useState("");
   const [teams, setTeams] = useState("");
+  const [contextAgent, setContextAgent] = useState<AgentSummary | null>(null);
 
   const repoQ = useQuery<AgentListResponse>({
     queryKey: ["/proxy/agents/repo", owner, repo],
@@ -311,6 +400,7 @@ export default function AgentsBrowser() {
             error={(allQ.error as Error) ?? null}
             filter={filter}
             emptyHint={owner && repo ? "No agents resolved for this repo." : "Set owner and repo above to load agents."}
+            onViewContext={setContextAgent}
           />
         </TabsContent>
         <TabsContent value="repo" className="pt-4">
@@ -320,6 +410,7 @@ export default function AgentsBrowser() {
             error={(repoQ.error as Error) ?? null}
             filter={filter}
             emptyHint={owner && repo ? "No repo-level agents found in .github/agents/." : "Set owner and repo to load."}
+            onViewContext={setContextAgent}
           />
         </TabsContent>
         <TabsContent value="org" className="pt-4">
@@ -329,6 +420,7 @@ export default function AgentsBrowser() {
             error={(orgQ.error as Error) ?? null}
             filter={filter}
             emptyHint={owner ? "No org-level agents found in .github-private/agents/." : "Set an owner to load."}
+            onViewContext={setContextAgent}
           />
         </TabsContent>
         <TabsContent value="enterprise" className="pt-4">
@@ -338,6 +430,7 @@ export default function AgentsBrowser() {
             error={(entQ.error as Error) ?? null}
             filter={filter}
             emptyHint="Set an enterprise owner to load enterprise-level agents."
+            onViewContext={setContextAgent}
           />
         </TabsContent>
         <TabsContent value="service" className="pt-4">
@@ -347,9 +440,12 @@ export default function AgentsBrowser() {
             error={(svcQ.error as Error) ?? null}
             filter={filter}
             emptyHint="No service-level agents found. Add .agent.md files to api/agents/."
+            onViewContext={setContextAgent}
           />
         </TabsContent>
       </Tabs>
+
+      <AgentContextSheet agent={contextAgent} onClose={() => setContextAgent(null)} />
     </div>
   );
 }

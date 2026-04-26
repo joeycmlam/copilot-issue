@@ -217,6 +217,14 @@ class AgentList(BaseModel):
     )
 
 
+class AgentBodyResponse(BaseModel):
+    """Response body for GET /agents/content — returns the raw .agent.md text."""
+
+    name: str
+    scope: str
+    body: str
+
+
 # ---------------------------------------------------------------------------
 # Issue listing
 # ---------------------------------------------------------------------------

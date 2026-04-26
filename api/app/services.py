@@ -208,6 +208,19 @@ class AgentResolver:
                 merged.append(a)
         return merged
 
+    async def fetch_body(self, source_repo: str, path: str) -> str | None:
+        """Fetch the raw text of a single .agent.md file from GitHub."""
+        try:
+            content = await self._gh.rest(
+                "GET",
+                f"/repos/{source_repo}/contents/{path}",
+            )
+        except GitHubError:
+            return None
+        if not isinstance(content, dict) or content.get("encoding") != "base64":
+            return None
+        return base64.b64decode(content["content"]).decode("utf-8", errors="replace")
+
     # -- Internals ---------------------------------------------------------
 
     async def _list(self, src: _AgentSource) -> list[CustomAgent]:
@@ -339,6 +352,19 @@ class AgentStore:
                 )
             )
         return agents
+
+    def get_body(self, path: str) -> str | None:
+        """Return raw text of a service-level .agent.md file (disk read)."""
+        target = (self._dir / path).resolve()
+        # Guard against path traversal outside the agents directory.
+        try:
+            target.relative_to(self._dir.resolve())
+        except ValueError:
+            return None
+        try:
+            return target.read_text(encoding="utf-8")
+        except OSError:
+            return None
 
 
 def _split_frontmatter(text: str) -> tuple[dict, str]:

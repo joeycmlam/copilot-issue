@@ -14,12 +14,13 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 import httpx
-from fastapi import Depends, FastAPI, Path
+from fastapi import Depends, FastAPI, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
 from .config import Settings, get_settings
 from .models import (
+    AgentBodyResponse,
     AgentList,
     AssignCopilotRequest,
     CreateAndAssignRequest,
@@ -332,6 +333,34 @@ async def list_all_agents(
         owner, repo, enterprise_owner=enterprise_owner, store=store, teams=team_list
     )
     return AgentList(scope="all", agents=agents)
+
+
+@app.get(
+    "/agents/content",
+    response_model=AgentBodyResponse,
+    tags=["agents"],
+    summary="Fetch the raw .agent.md file content",
+    description=(
+        "Returns the full raw text (YAML frontmatter + markdown body) of a single "
+        "agent profile. Pass `scope`, `source_repo`, and `path` as query parameters "
+        "(values are returned in the agent listing endpoints)."
+    ),
+)
+async def get_agent_content(
+    scope: str,
+    source_repo: str,
+    path: str,
+    resolver: AgentResolver = Depends(get_resolver),
+    store: AgentStore = Depends(get_store),
+) -> AgentBodyResponse:
+    name = path.rsplit("/", 1)[-1].removesuffix(".agent.md").removesuffix(".md")
+    if scope == "service":
+        body = store.get_body(path)
+    else:
+        body = await resolver.fetch_body(source_repo, path)
+    if body is None:
+        raise HTTPException(status_code=404, detail="Agent file not found")
+    return AgentBodyResponse(name=name, scope=scope, body=body)
 
 
 @app.post(
