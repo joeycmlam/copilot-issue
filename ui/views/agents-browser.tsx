@@ -19,13 +19,14 @@ import { useQueryClient } from "@tanstack/react-query";
 // Mirrors CustomAgent from the FastAPI service
 type AgentSummary = {
   name: string;
-  scope: "repo" | "org" | "enterprise";
+  scope: "repo" | "org" | "enterprise" | "service";
   source_repo: string;
   path: string;
   description?: string | null;
   tools?: string[];
   handoffs?: string[];
   target?: "vscode" | "github-copilot" | "any";
+  allowed_teams?: string[];
 };
 
 // API returns { scope, agents, resolution_order }
@@ -45,7 +46,9 @@ function scopeColor(scope: AgentSummary["scope"]) {
     ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
     : scope === "org"
       ? "border-primary/40 bg-accent text-accent-foreground"
-      : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400";
+      : scope === "service"
+        ? "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+        : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400";
 }
 
 function AgentCard({ agent }: { agent: AgentSummary }) {
@@ -73,6 +76,16 @@ function AgentCard({ agent }: { agent: AgentSummary }) {
             <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Tools</div>
             <div className="flex flex-wrap gap-1.5">
               {agent.tools.map((t) => (
+                <span key={t} className="pill text-[11px]">{t}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {agent.allowed_teams && agent.allowed_teams.length > 0 && (
+          <div>
+            <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">Restricted to</div>
+            <div className="flex flex-wrap gap-1.5">
+              {agent.allowed_teams.map((t) => (
                 <span key={t} className="pill text-[11px]">{t}</span>
               ))}
             </div>
@@ -179,6 +192,7 @@ export default function AgentsBrowser() {
   const [repo, setRepo] = useState(settings.defaultRepo);
   const [enterprise, setEnterprise] = useState(settings.defaultEnterprise);
   const [filter, setFilter] = useState("");
+  const [teams, setTeams] = useState("");
 
   const repoQ = useQuery<AgentListResponse>({
     queryKey: ["/proxy/agents/repo", owner, repo],
@@ -192,6 +206,17 @@ export default function AgentsBrowser() {
     queryKey: ["/proxy/agents/enterprise", enterprise],
     enabled: Boolean(enterprise),
   });
+  const svcQ = useQuery<AgentListResponse>({
+    queryKey: ["/proxy/agents/service", teams],
+    queryFn: async () => {
+      const url = teams.trim()
+        ? `/api/proxy/agents/service?teams=${encodeURIComponent(teams.trim())}`
+        : `/api/proxy/agents/service`;
+      const res = await fetch(url, { headers: { accept: "application/json" } });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+  });
   const allQ = useQuery<AgentListResponse>({
     queryKey: ["/proxy/agents", owner, repo, "all"],
     enabled: Boolean(owner && repo),
@@ -201,6 +226,7 @@ export default function AgentsBrowser() {
     qc.invalidateQueries({ queryKey: ["/proxy/agents/repo"] });
     qc.invalidateQueries({ queryKey: ["/proxy/agents/org"] });
     qc.invalidateQueries({ queryKey: ["/proxy/agents/enterprise"] });
+    qc.invalidateQueries({ queryKey: ["/proxy/agents/service"] });
     qc.invalidateQueries({ queryKey: ["/proxy/agents"] });
   };
 
@@ -208,7 +234,7 @@ export default function AgentsBrowser() {
     <div className="mx-auto max-w-6xl px-6 py-8">
       <PageHeader
         title="Agents"
-        description="Browse the .agent.md profiles GitHub will resolve when you reference an agent by name (repo → org → enterprise)."
+        description="Browse .agent.md profiles: GitHub-hosted (repo → org → enterprise) and service-level agents bundled with this API."
         actions={
           <Button variant="outline" onClick={refresh} data-testid="button-refresh">
             <RefreshCw className="h-4 w-4 mr-1.5" /> Refresh
@@ -232,22 +258,32 @@ export default function AgentsBrowser() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="field-filter">Filter</Label>
-              <div className="relative">
-                <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="field-filter"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="search by name, description, tool…"
-                  className="pl-8"
-                  data-testid="input-filter"
-                />
-              </div>
+              <Label htmlFor="field-teams">Your teams (optional)</Label>
+              <Input
+                id="field-teams"
+                value={teams}
+                onChange={(e) => setTeams(e.target.value)}
+                placeholder="platform, devops"
+                className="font-mono"
+                data-testid="input-teams"
+              />
+              <p className="text-[11px] text-muted-foreground">Comma-separated team slugs — unlocks restricted service agents.</p>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <div className="mb-4 relative">
+        <Search className="h-4 w-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id="field-filter"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="search by name, description, tool…"
+          className="pl-8"
+          data-testid="input-filter"
+        />
+      </div>
 
       <Tabs defaultValue="all">
         <TabsList>
@@ -262,6 +298,9 @@ export default function AgentsBrowser() {
           </TabsTrigger>
           <TabsTrigger value="enterprise" data-testid="tab-enterprise">
             Enterprise <Badge variant="secondary" className="ml-2 font-mono text-[10px]">{normalize(entQ.data).length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="service" data-testid="tab-service">
+            Service <Badge variant="secondary" className="ml-2 font-mono text-[10px]">{normalize(svcQ.data).length}</Badge>
           </TabsTrigger>
         </TabsList>
 
@@ -299,6 +338,15 @@ export default function AgentsBrowser() {
             error={(entQ.error as Error) ?? null}
             filter={filter}
             emptyHint="Set an enterprise owner to load enterprise-level agents."
+          />
+        </TabsContent>
+        <TabsContent value="service" className="pt-4">
+          <AgentList
+            agents={normalize(svcQ.data)}
+            loading={svcQ.isLoading}
+            error={(svcQ.error as Error) ?? null}
+            filter={filter}
+            emptyHint="No service-level agents found. Add .agent.md files to api/agents/."
           />
         </TabsContent>
       </Tabs>

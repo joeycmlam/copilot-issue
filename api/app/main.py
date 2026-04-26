@@ -28,7 +28,7 @@ from .models import (
     IssueListResponse,
     IssueResponse,
 )
-from .services import AgentResolver, GitHubClient, IssueService
+from .services import AgentResolver, AgentStore, GitHubClient, IssueService
 
 logger = logging.getLogger("copilot_issue_api")
 
@@ -113,6 +113,10 @@ def get_issue_service(
 
 def get_resolver(gh: GitHubClient = Depends(get_gh)) -> AgentResolver:
     return AgentResolver(gh)
+
+
+def get_store() -> AgentStore:
+    return AgentStore()
 
 
 # ---------------------------------------------------------------------------
@@ -268,17 +272,91 @@ async def list_enterprise_agents(
 
 
 @app.get(
+    "/agents/service",
+    response_model=AgentList,
+    tags=["agents"],
+    summary="List service-level custom agents bundled with the API",
+    description=(
+        "Returns `.agent.md` files shipped inside the `api/agents/` directory. "
+        "Pass `?teams=team1,team2` to include agents restricted to those teams. "
+        "Agents with no `allowed_teams` restriction are always returned."
+    ),
+)
+async def list_service_agents(
+    teams: str = "",
+    store: AgentStore = Depends(get_store),
+) -> AgentList:
+    team_list = [t.strip() for t in teams.split(",") if t.strip()] if teams else []
+    agents = store.list_agents(team_list)
+    return AgentList(scope="service", agents=agents)
+
+
+@app.post(
+    "/agents/service/refresh",
+    response_model=AgentList,
+    tags=["agents"],
+    summary="Force-refresh the service-level custom agent list",
+    description=(
+        "Re-reads the `api/agents/` directory from disk and returns the current "
+        "list of bundled `.agent.md` files. Use this after adding, updating, or "
+        "removing a service agent without restarting the API. "
+        "Pass `?teams=team1,team2` to include team-restricted agents."
+    ),
+)
+async def refresh_service_agents(
+    teams: str = "",
+    store: AgentStore = Depends(get_store),
+) -> AgentList:
+    team_list = [t.strip() for t in teams.split(",") if t.strip()] if teams else []
+    agents = store.list_agents(team_list)
+    return AgentList(scope="service", agents=agents)
+
+
+@app.get(
     "/agents/{owner}/{repo}/all",
     response_model=AgentList,
     tags=["agents"],
-    summary="List all agents in resolution order (repo -> org -> enterprise)",
+    summary="List all agents in resolution order (repo -> org -> enterprise -> service)",
 )
 async def list_all_agents(
     owner: str,
     repo: str,
+    teams: str = "",
     settings: Settings = Depends(get_settings),
     resolver: AgentResolver = Depends(get_resolver),
+    store: AgentStore = Depends(get_store),
 ) -> AgentList:
     enterprise_owner = settings.default_enterprise
-    agents = await resolver.list_all(owner, repo, enterprise_owner=enterprise_owner)
+    team_list = [t.strip() for t in teams.split(",") if t.strip()] if teams else []
+    agents = await resolver.list_all(
+        owner, repo, enterprise_owner=enterprise_owner, store=store, teams=team_list
+    )
+    return AgentList(scope="all", agents=agents)
+
+
+@app.post(
+    "/agents/{owner}/{repo}/refresh",
+    response_model=AgentList,
+    tags=["agents"],
+    summary="Force-refresh the full agents list from all sources",
+    description=(
+        "Re-fetches agent profiles from all scopes (repo → org → enterprise → service) "
+        "and returns the merged, deduplicated list. Use this after publishing or updating "
+        "an `.agent.md` file to pick up the changes immediately. "
+        "Pass `?teams=team1,team2` to include team-restricted service agents."
+    ),
+)
+async def refresh_agents(
+    owner: str,
+    repo: str,
+    teams: str = "",
+    settings: Settings = Depends(get_settings),
+    resolver: AgentResolver = Depends(get_resolver),
+    store: AgentStore = Depends(get_store),
+) -> AgentList:
+    enterprise_owner = settings.default_enterprise
+    team_list = [t.strip() for t in teams.split(",") if t.strip()] if teams else []
+    agents = await resolver.list_all(
+        owner, repo, enterprise_owner=enterprise_owner, store=store, teams=team_list
+    )
     return AgentList(scope="all", agents=agents)

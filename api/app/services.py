@@ -18,6 +18,7 @@ import asyncio
 import base64
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -180,9 +181,14 @@ class AgentResolver:
         )
 
     async def list_all(
-        self, owner: str, repo: str, enterprise_owner: str = ""
+        self,
+        owner: str,
+        repo: str,
+        enterprise_owner: str = "",
+        store: "AgentStore | None" = None,
+        teams: list[str] | None = None,
     ) -> list[CustomAgent]:
-        """Resolution order: repo -> org -> enterprise. Earlier wins on name."""
+        """Resolution order: repo -> org -> enterprise -> service. Earlier wins on name."""
 
         repo_agents, org_agents, ent_agents = await asyncio.gather(
             self.list_repo(owner, repo),
@@ -190,9 +196,11 @@ class AgentResolver:
             self.list_enterprise(enterprise_owner) if enterprise_owner else _empty(),
         )
 
+        svc_agents: list[CustomAgent] = store.list_agents(teams) if store else []
+
         seen: set[str] = set()
         merged: list[CustomAgent] = []
-        for batch in (repo_agents, org_agents, ent_agents):
+        for batch in (repo_agents, org_agents, ent_agents, svc_agents):
             for a in batch:
                 if a.name in seen:
                     continue
@@ -262,6 +270,75 @@ class AgentResolver:
 
 async def _empty() -> list[CustomAgent]:
     return []
+
+
+# ---------------------------------------------------------------------------
+# Service-level agent store
+# ---------------------------------------------------------------------------
+
+_AGENTS_DIR = Path(__file__).parent.parent / "agents"
+
+
+class AgentStore:
+    """Serves `.agent.md` files bundled with the API service.
+
+    Files live under ``api/agents/`` in the repo.  Any file whose YAML
+    frontmatter contains an ``allowed_teams`` list is restricted to callers
+    whose team membership intersects that list.  An absent or empty
+    ``allowed_teams`` makes the agent visible to everyone.
+    """
+
+    def __init__(self, agents_dir: Path = _AGENTS_DIR):
+        self._dir = agents_dir
+
+    def list_agents(self, teams: list[str] | None = None) -> list[CustomAgent]:
+        """Return all service agents the caller is allowed to see.
+
+        ``teams`` is the caller's team slug list (e.g. ``["platform", "qa"]``).
+        Pass ``None`` or ``[]`` to get only public (unrestricted) agents.
+        """
+        caller_teams = set(teams or [])
+        agents: list[CustomAgent] = []
+        if not self._dir.is_dir():
+            return agents
+        # Collect all .agent.md and .md files; .agent.md takes priority on
+        # name collisions (same resolution order as AgentResolver).
+        _seen_names: set[str] = set()
+        _all_paths = sorted(
+            {*self._dir.rglob("*.agent.md"), *self._dir.rglob("*.md")}
+        )
+        # Sort so .agent.md files come first (they win on name collision).
+        _all_paths.sort(key=lambda p: (0 if p.name.endswith(".agent.md") else 1, p))
+        for path in _all_paths:
+            if path.name.lower() in {"readme.md", "index.md"}:
+                continue
+            try:
+                raw = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            meta, _body = _split_frontmatter(raw)
+            allowed: list[str] = list(meta.get("allowed_teams", []) or [])
+            if allowed and not caller_teams.intersection(allowed):
+                continue
+            agent_name = path.stem.removesuffix(".agent")
+            resolved_name = meta.get("name", agent_name)
+            if resolved_name in _seen_names:
+                continue
+            _seen_names.add(resolved_name)
+            agents.append(
+                CustomAgent(
+                    name=resolved_name,
+                    scope="service",
+                    source_repo="(built-in)",
+                    path=str(path.relative_to(self._dir)),
+                    description=meta.get("description"),
+                    tools=list(meta.get("tools", []) or []),
+                    handoffs=list(meta.get("handoffs", []) or []),
+                    target=meta.get("target", "any"),
+                    allowed_teams=allowed,
+                )
+            )
+        return agents
 
 
 def _split_frontmatter(text: str) -> tuple[dict, str]:
